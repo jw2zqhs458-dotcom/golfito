@@ -36,6 +36,26 @@ estado de sesión por cookie. El flujo replicado en [`lib/newman.ts`](lib/newman
 Idempotencia: antes de reservar se revisa la planilla buscando tu apellido
 (`NEWMAN_SURNAME`); si ya tenés lugar, no duplica.
 
+### Plantel por defecto
+
+En [`lib/roster.ts`](lib/roster.ts) está el "foursome" predeterminado (con
+apodos), validado contra el sistema del club:
+
+| Apodo | Matrícula | Nombre |
+|-------|-----------|--------|
+| yo   | 129978 | MACRI ANTONIO AUGUSTO |
+| Oso  | 140777 | AZUMENDI SANTIAGO MARIA |
+| Bato | 173418 | ARAMBURU BAUTISTA |
+| Juan | 137512 | BENEDIT JUAN |
+
+Si `NEWMAN_PARTNERS` no está seteada, se usan Oso, Bato y Juan como
+acompañantes. Los avisos de WhatsApp muestran los apodos.
+
+El formulario de reserva del club ofrece a veces 1 fila y a veces hasta 4
+(según el cupo del socio en ese momento). `book()` lo maneja agregando a los
+jugadores en tandas: repite inicio→verificar→agregar sobre la misma línea hasta
+anotar a todos o agotar los lugares.
+
 ---
 
 ## Estructura
@@ -68,7 +88,7 @@ Copiá [`.env.example`](.env.example) y completá. En Vercel se cargan en
 | `NEWMAN_SURNAME` | `MACRI` | Apellido del socio (anti-duplicados) |
 | `NEWMAN_TARGET_DAYS` | `sabado,domingo` | Días a buscar |
 | `NEWMAN_TARGET_TIME` | `10:00` | Horario objetivo (línea más cercana) |
-| `NEWMAN_PARTNERS` | `130011,128456` | Matrículas de acompañantes (opcional) |
+| `NEWMAN_PARTNERS` | `140777,173418` | Acompañantes (opcional; si se omite usa el plantel de `lib/roster.ts`) |
 | `NEWMAN_AUTO_BOOK` | `true` | `true` reserva; `false` sólo avisa |
 | `CRON_SECRET` | `xxxx` | Protege `/api/cron` |
 | `TWILIO_ACCOUNT_SID` | `ACxxxx` | Twilio |
