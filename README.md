@@ -89,7 +89,7 @@ Copiá [`.env.example`](.env.example) y completá. En Vercel se cargan en
 | `NEWMAN_TARGET_DAYS` | `sabado,domingo` | Días a buscar |
 | `NEWMAN_TARGET_TIME` | `10:00` | Horario objetivo (línea más cercana) |
 | `NEWMAN_PARTNERS` | `140777,173418` | Acompañantes (opcional; si se omite usa el plantel de `lib/roster.ts`) |
-| `NEWMAN_AUTO_BOOK` | `true` | `true` reserva; `false` sólo avisa |
+| `NEWMAN_AUTO_BOOK` | `false` | `true` reserva; `false` sólo avisa (default seguro) |
 | `CRON_SECRET` | `xxxx` | Protege `/api/cron` |
 | `TWILIO_ACCOUNT_SID` | `ACxxxx` | Twilio |
 | `TWILIO_AUTH_TOKEN` | `xxxx` | Twilio |
@@ -148,3 +148,14 @@ npm run dev                # dashboard en http://localhost:3000
 - `/api/cron` se protege con `CRON_SECRET` (Vercel manda el header
   `Authorization: Bearer <CRON_SECRET>` automáticamente).
 - La app sólo opera **tu propia** cuenta de socio.
+
+## Cuidados importantes
+
+- **Cupo del club**: el sistema limita las reservas por socio (`permitidas = N`).
+  Si ya tenés una reserva activa, el cupo puede ser **0** y cualquier intento se
+  rechaza. `book()` lo detecta (`quotaExceeded`) y no insiste.
+- **Mails**: cada interacción de reserva (verificar/confirmar) puede disparar
+  mails del club a los jugadores involucrados. Por eso `book()` hace **un solo
+  intento sin reintentos**, los acompañantes están **vacíos por defecto** (sólo
+  tu matrícula) y `NEWMAN_AUTO_BOOK` arranca en `false`. Subí estos valores sólo
+  cuando estés listo.

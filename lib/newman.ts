@@ -48,6 +48,8 @@ export interface BookingResult {
   added?: string[];
   /** Matrículas que no se pudieron anotar. */
   failures?: string[];
+  /** El club rechazó por cupo (permitidas = N). */
+  quotaExceeded?: boolean;
 }
 
 function stripAccents(s: string): string {
@@ -167,83 +169,70 @@ export class NewmanClient {
    * el socio quedó anotado.
    */
   async book(torneoId: string, slot: Slot, matricula: string, partners: string[]): Promise<BookingResult> {
-    const queue = [matricula, ...partners].slice(0, 4);
-    const added: string[] = [];
-    const failures: string[] = [];
-    let guard = 0;
+    const players = [matricula, ...partners].slice(0, 4);
 
-    while (queue.length && guard < 6) {
-      guard++;
-      const start = await this.post('reservasalta.php', {
-        txtkey: matricula,
-        txtkey2: String(slot.hora),
-        txtkey3: String(slot.minuto),
-        txtkey4: torneoId,
-        txtkey5: String(slot.hoyo),
-        txtaction: 'inicio',
+    // Un solo "inicio" por reserva. SIN reintentos: cada llamada al sistema
+    // del club puede disparar mails a los jugadores, así que nunca repetimos.
+    const start = await this.post('reservasalta.php', {
+      txtkey: matricula,
+      txtkey2: String(slot.hora),
+      txtkey3: String(slot.minuto),
+      txtkey4: torneoId,
+      txtkey5: String(slot.hoyo),
+      txtaction: 'inicio',
+    });
+    const rows = (start.match(/name="txtID\d"/gi) ?? []).length;
+    if (rows < 1) {
+      return { ok: false, message: 'No se pudo abrir el formulario (¿línea llena o ventana cerrada?).', slot };
+    }
+
+    const batch = players.slice(0, Math.min(rows, 4));
+    const form: Record<string, string> = {
+      txtv: '', txttag: '', txtv2: '', txtv3: '', txtv4: '',
+      txtID1: '', txtName1: '', txtID2: '', txtName2: '',
+      txtID3: '', txtName3: '', txtID4: '', txtName4: '',
+    };
+
+    for (let i = 0; i < batch.length; i++) {
+      const r = i + 1;
+      const vhtml = await this.post('reservasalta.php', {
+        ...form,
+        txtv: String(r),
+        txtv2: batch[i],
+        txtv3: '',
+        txtaction: 'verificar',
       });
-      const rows = (start.match(/name="txtID\d"/gi) ?? []).length;
-      if (rows < 1) {
-        // No hay más lugares en la línea (o ventana cerrada).
-        if (!added.length) {
-          return { ok: false, message: 'No se pudo abrir el formulario (¿línea llena o ventana cerrada?).', slot };
-        }
-        break;
-      }
-
-      // Cuántos jugadores podemos cargar en esta tanda.
-      const batch = queue.splice(0, Math.min(rows, 4));
-      const form: Record<string, string> = {
-        txtv: '', txttag: '', txtv2: '', txtv3: '', txtv4: '',
-        txtID1: '', txtName1: '', txtID2: '', txtName2: '',
-        txtID3: '', txtName3: '', txtID4: '', txtName4: '',
-      };
-
-      let ok = true;
-      for (let i = 0; i < batch.length; i++) {
-        const r = i + 1;
-        const vhtml = await this.post('reservasalta.php', {
-          ...form,
-          txtv: String(r),
-          txtv2: batch[i],
-          txtv3: '',
-          txtaction: 'verificar',
-        });
-        const name =
-          extractInputValue(vhtml, `txtName${r}`) ||
-          extractInputValue(vhtml, 'txtName1') ||
-          '';
-        if (!name) {
-          failures.push(batch[i]);
-          ok = false;
-          break;
-        }
-        form[`txtID${r}`] = batch[i];
-        form[`txtName${r}`] = name;
-      }
-      if (!ok) {
-        // Cancelamos esta tanda y seguimos con los que falten.
+      const name = extractInputValue(vhtml, `txtName${r}`) || extractInputValue(vhtml, 'txtName1') || '';
+      if (!name) {
         await this.get('reservasalta.php?volver=SI').catch(() => undefined);
-        continue;
+        return { ok: false, message: `No se pudo validar la matrícula ${batch[i]}.`, slot };
       }
-
-      const confirm = await this.post('reservasalta.php', { ...form, txtaction: 'agregar' });
-      if (/TIEMPO DISPONIBLE PARA REALIZAR LA RESERVA HA FINALIZADO/i.test(confirm) && !/confirmad/i.test(confirm)) {
-        // Reintentamos esta tanda una vez más (vuelve a la cola).
-        queue.unshift(...batch);
-        continue;
-      }
-      added.push(...batch);
+      form[`txtID${r}`] = batch[i];
+      form[`txtName${r}`] = name;
     }
 
-    if (!added.includes(matricula)) {
-      return { ok: false, message: 'No se pudo anotar al socio en la línea.', slot };
+    const confirm = await this.post('reservasalta.php', { ...form, txtaction: 'agregar' });
+
+    // El club limita el cupo por torneo/socio; si es 0 (o se excede), rechaza.
+    const quota = confirm.match(/permitidas?\s*que\s*son\s*(\d+)/i);
+    if (quota) {
+      await this.get('reservasalta.php?volver=SI').catch(() => undefined);
+      return {
+        ok: false,
+        quotaExceeded: true,
+        message: `El club no habilita esta reserva: cupo permitido para el torneo = ${quota[1]} (suele ser 0 si ya tenés otra reserva activa).`,
+        slot,
+      };
     }
-    const msg =
-      `Anotados: ${added.length} jugador(es).` +
-      (failures.length ? ` No se pudo con: ${failures.join(', ')}.` : '') +
-      (queue.length ? ` Sin lugar para: ${queue.join(', ')}.` : '');
-    return { ok: true, message: msg, slot, added, failures };
+    if (/TIEMPO DISPONIBLE PARA REALIZAR LA RESERVA HA FINALIZADO/i.test(confirm) && !/confirmad/i.test(confirm)) {
+      return { ok: false, message: 'Se venció la ventana de tiempo del club al confirmar.', slot };
+    }
+    // Confirmación: re-leemos la planilla para verificar que el socio quedó anotado.
+    const check = await this.getSheet(torneoId, matricula);
+    if (!check.alreadyMine) {
+      return { ok: false, message: 'El club no confirmó la reserva (no aparece en la planilla).', slot };
+    }
+    return { ok: true, message: `Reserva confirmada (${batch.length} jugador/es).`, slot, added: batch };
   }
 }
 

@@ -4,7 +4,7 @@
 import { getConfig, minutesToHHMM, type Weekday } from './config';
 import { NewmanClient, pickBestSlot, type Slot, type Tournament } from './newman';
 import { sendWhatsApp } from './twilio';
-import { defaultPartners, apodoFor } from './roster';
+import { apodoFor } from './roster';
 
 export interface DayReport {
   day: Weekday;
@@ -12,6 +12,7 @@ export interface DayReport {
   status:
     | 'sin_torneo'        // todavía no se publicó el torneo de ese día
     | 'cerradas'          // torneo publicado pero reservas no abiertas
+    | 'no_habilitado'     // abierto pero el club no da cupo al socio (permitidas=0)
     | 'ya_reservado'      // ya tengo reserva en ese torneo
     | 'sin_lugares'       // abierto pero sin lugares libres
     | 'disponible'        // hay lugares (modo sólo aviso)
@@ -41,8 +42,9 @@ export async function run(opts: { dryRun?: boolean } = {}): Promise<RunResult> {
     return { ranAt, autoBook: cfg.autoBook, reports: [], notified: false, notifyDetail: 'Faltan NEWMAN_USER / NEWMAN_PASS.' };
   }
 
-  // Acompañantes: los de la env var si están, si no el plantel predeterminado.
-  const partners = cfg.partners.length ? cfg.partners : defaultPartners();
+  // Acompañantes: SÓLO los de NEWMAN_PARTNERS. Por defecto vacío (reserva sólo
+  // el socio) para no enviar mails a terceros sin querer.
+  const partners = cfg.partners;
   const lineupLabel = [cfg.user, ...partners].map(apodoFor).join(', ');
 
   const client = new NewmanClient();
@@ -85,6 +87,9 @@ export async function run(opts: { dryRun?: boolean } = {}): Promise<RunResult> {
           `✅ ${capitalize(day)} ${t.date} — reservado ${best.label} (hoyo ${best.hoyo}).\n` +
             `${t.name}\nJugadores: ${lineupLabel}`
         );
+      } else if (res.quotaExceeded) {
+        // El club todavía no habilita el cupo: reintentamos callados (sin avisar).
+        reports.push({ day, tournament: tslim, status: 'no_habilitado', bestSlot: best, detail: res.message });
       } else {
         reports.push({ day, tournament: tslim, status: 'error_reserva', bestSlot: best, detail: res.message });
         availableMessages.push(

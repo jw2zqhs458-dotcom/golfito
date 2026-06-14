@@ -80,7 +80,9 @@ export function getConfig(): Config {
     partners: parseList(env.NEWMAN_PARTNERS),
     targetDays: parseDays(env.NEWMAN_TARGET_DAYS),
     targetMinutes: parseTime(env.NEWMAN_TARGET_TIME),
-    autoBook: (env.NEWMAN_AUTO_BOOK ?? 'true').toLowerCase() !== 'false',
+    // Por seguridad arranca en modo SÓLO AVISO. Poné NEWMAN_AUTO_BOOK=true
+    // explícitamente cuando quieras que reserve solo.
+    autoBook: (env.NEWMAN_AUTO_BOOK ?? 'false').toLowerCase() === 'true',
     cronSecret: env.CRON_SECRET ?? '',
     twilio: {
       accountSid: env.TWILIO_ACCOUNT_SID,
