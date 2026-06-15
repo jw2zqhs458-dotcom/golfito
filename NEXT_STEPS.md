@@ -1,0 +1,61 @@
+# 🌅 Pasos para mañana (deploy y validación)
+
+Todo el código está listo y mergeado a `main`. Falta sólo conectar Vercel
+(una vez) y validar que el navegador headless pasa Cloudflare desde Vercel.
+
+## 1) Importar el proyecto en Vercel (una vez)
+1. **vercel.com → Add New → Project → Import** el repo `golfito`.
+2. Como ahora está en `main`, Vercel lo toma directo (no hay que tocar branch).
+3. Framework: Next.js (lo detecta solo). **Deploy**.
+
+## 2) Variables de entorno (Settings → Environment Variables)
+```
+NEWMAN_USER         = 129978
+NEWMAN_PASS         = 129978
+NEWMAN_SURNAME      = MACRI
+NEWMAN_TARGET_DAYS  = sabado,domingo
+NEWMAN_TARGET_TIME  = 10:00
+NEWMAN_AUTO_BOOK    = false
+CRON_SECRET         = 55e318736e9e34e8a8d71c1a353a5c5688636476c0bcbe3e
+```
+(Después, para WhatsApp: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_WHATSAPP_FROM`, `TWILIO_WHATSAPP_TO`.)
+
+Redeploy después de cargar las variables (Deployments → … → Redeploy).
+
+## 3) Memoria de la función (Chromium la necesita)
+**Settings → Functions → Memory → 1024 MB** (o más). Redeploy.
+
+## 4) Validar — el momento de la verdad 🎯
+Con un torneo **abierto entre semana** (mirá el ID en la web; ej. el del día
+siguiente), abrí en el navegador:
+```
+https://TU-APP.vercel.app/api/check
+```
+→ Debe listar torneos y disponibilidad (confirma que las **lecturas** andan).
+
+Después, la reserva real con navegador:
+```
+https://TU-APP.vercel.app/api/book-test?secret=55e318736e9e34e8a8d71c1a353a5c5688636476c0bcbe3e&torneo=ID_DEL_TORNEO
+```
+- `{"ok":true,"message":"Reserva confirmada"}` → **¡pasó Cloudflare desde
+  Vercel!** Todo funciona. Borrá esa reserva de prueba con la X roja.
+- `{"ok":false,...}` → copiame la respuesta y los **Runtime Logs** de Vercel
+  (Deployments → Functions → Logs) y lo ajusto. Causas típicas: memoria baja
+  o el binario de Chromium (`@sparticuz/chromium`).
+
+## 5) Activar el modo real (cuando la validación dé verde)
+- `NEWMAN_AUTO_BOOK = true`.
+- Para reservar con tu foursome: `NEWMAN_PARTNERS = 140777,173418,137512`
+  (Oso, Bato, Juan). Dejalo vacío para reservar sólo vos.
+- El cron corre cada 15 min (`vercel.json`). En **Hobby** el cron es lento
+  (~1/día); para pollear rápido cuando abren las reservas del finde, usá un
+  scheduler externo (cron-job.org) apuntando a
+  `https://TU-APP.vercel.app/api/cron?secret=EL_SECRET` cada pocos minutos,
+  o pasá a **Pro** y bajá el `schedule` en `vercel.json`.
+
+## Notas
+- En **Hobby**, `maxDuration` máx es 60 s (puede ser justo con el arranque en
+  frío de Chromium). En **Pro** subilo a 300 s para margen.
+- El plantel y apodos están en `lib/roster.ts`.
+- Cualquier ajuste de código que haga falta, lo pusheo y Vercel redeploya solo.

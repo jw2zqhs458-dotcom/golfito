@@ -73,15 +73,32 @@ export async function bookWithBrowser(opts: {
       ),
     ]);
 
-    // 5) Esperar el formulario de jugadores y cargar las matrículas
+    // 5) Esperar el formulario de jugadores y cargar las matrículas.
+    //    Hacemos Verificar fila por fila (el flujo que el usuario hace a mano y
+    //    que sabemos que funciona) y luego Confirmar. Es más robusto que
+    //    confirmar a ciegas en un deploy que todavía no validamos.
     await page.waitForSelector('input[name=txtID1]', { timeout: 30000 });
     const rows = await page.locator('input[name^="txtID"]').count();
     const players = [matricula, ...partners].slice(0, Math.max(1, Math.min(rows, 4)));
     for (let i = 0; i < players.length; i++) {
-      await page.fill(`input[name=txtID${i + 1}]`, players[i]);
+      const r = i + 1;
+      await page.fill(`input[name=txtID${r}]`, players[i]);
+      // verificar(fila, matrícula, nombre) — recarga el form con el nombre.
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => undefined),
+        page.evaluate(
+          (args: { row: number; id: string }) => {
+            (window as unknown as { verificar: (...a: unknown[]) => void }).verificar(
+              args.row, args.id, '',
+            );
+          },
+          { row: r, id: players[i] },
+        ),
+      ]);
+      await page.waitForSelector('input[name=txtID1]', { timeout: 30000 });
     }
 
-    // 6) Confirmar directo (sin Verificar)
+    // 6) Confirmar la reserva.
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => undefined),
       page.evaluate(() => {
