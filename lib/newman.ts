@@ -68,6 +68,17 @@ export class NewmanClient {
       .join('; ');
   }
 
+  // Para ESCRIBIR (alta/baja de reserva) el servidor sólo acepta las 2 cookies
+  // base (danielap_newman + PHPSESSID). Si se le mandan también las de config
+  // danielap_newman1..N, descarta el alta en silencio. Las lecturas, en cambio,
+  // necesitan las cookies completas para que la sesión quede bien configurada.
+  private writeCookieHeader(): string {
+    return ['danielap_newman', 'PHPSESSID']
+      .filter((n) => this.cookies.has(n))
+      .map((n) => `${n}=${this.cookies.get(n)}`)
+      .join('; ');
+  }
+
   private storeSetCookies(res: Response) {
     // undici expone getSetCookie() para múltiples Set-Cookie.
     const anyHeaders = res.headers as unknown as { getSetCookie?: () => string[] };
@@ -95,31 +106,52 @@ export class NewmanClient {
     return new TextDecoder('latin1').decode(buf);
   }
 
+  // Referer de la última URL visitada (como navega un browser). El sistema del
+  // club EXIGE headers de navegador real para aceptar el alta de reservas; con
+  // headers mínimos el "agregar" se descarta en silencio.
+  private lastUrl: string | undefined;
+
+  private browserHeaders(write = false): Record<string, string> {
+    const h: Record<string, string> = {
+      Cookie: write ? this.writeCookieHeader() : this.cookieHeader(),
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      Accept:
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'es-419,es;q=0.9',
+      Origin: 'https://www.clubnewmangolf.com',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
+    };
+    if (this.lastUrl) h.Referer = this.lastUrl;
+    return h;
+  }
+
   private async get(path: string): Promise<string> {
-    const res = await fetch(`${BASE}/${path}`, {
+    const url = `${BASE}/${path}`;
+    const res = await fetch(url, {
       method: 'GET',
-      headers: {
-        Cookie: this.cookieHeader(),
-        'User-Agent': 'Mozilla/5.0 (golfito)',
-      },
+      headers: this.browserHeaders(),
       redirect: 'manual',
     });
+    this.lastUrl = url;
     this.storeSetCookies(res);
     return this.readText(res);
   }
 
   private async post(path: string, data: Record<string, string>): Promise<string> {
+    const url = `${BASE}/${path}`;
     const body = new URLSearchParams(data).toString();
-    const res = await fetch(`${BASE}/${path}`, {
+    const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        Cookie: this.cookieHeader(),
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozilla/5.0 (golfito)',
-      },
+      headers: { ...this.browserHeaders(true), 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
       redirect: 'manual',
     });
+    this.lastUrl = url;
     this.storeSetCookies(res);
     return this.readText(res);
   }
@@ -195,6 +227,8 @@ export class NewmanClient {
 
     for (let i = 0; i < batch.length; i++) {
       const r = i + 1;
+      // Como el browser: la matrícula ya está cargada en txtID{r} al verificar.
+      form[`txtID${r}`] = batch[i];
       const vhtml = await this.post('reservasalta.php', {
         ...form,
         txtv: String(r),
@@ -224,15 +258,32 @@ export class NewmanClient {
         slot,
       };
     }
-    if (/TIEMPO DISPONIBLE PARA REALIZAR LA RESERVA HA FINALIZADO/i.test(confirm) && !/confirmad/i.test(confirm)) {
-      return { ok: false, message: 'Se venció la ventana de tiempo del club al confirmar.', slot };
-    }
-    // Confirmación: re-leemos la planilla para verificar que el socio quedó anotado.
+    // La verdad la da la planilla: el texto del alert de "tiempo finalizado"
+    // está SIEMPRE en el JS de la página, así que no sirve para detectar éxito.
     const check = await this.getSheet(torneoId, matricula);
     if (!check.alreadyMine) {
       return { ok: false, message: 'El club no confirmó la reserva (no aparece en la planilla).', slot };
     }
     return { ok: true, message: `Reserva confirmada (${batch.length} jugador/es).`, slot, added: batch };
+  }
+
+  /**
+   * Cancela la reserva del socio en un torneo (la primera que encuentre a su
+   * nombre). Devuelve true si quedó cancelada.
+   */
+  async cancelReservation(torneoId: string, matricula: string): Promise<boolean> {
+    const html = await this.get(`reservas.php?TorneoID=${encodeURIComponent(torneoId)}&vuelta=index2.php`);
+    const idx = html.indexOf(`[${matricula}-`);
+    if (idx < 0) return true; // no hay reserva mía: ya está "cancelada"
+    // La X de borrado: onclick="...borrarReserva(intN,Hora,Minuto,'TID',hoyo,'NOMBRE')"
+    const m = html.slice(idx, idx + 500).match(/borrarReserva\((\d+),(\d+),(\d+),'(\w+)',(\d+)/);
+    if (!m) return false;
+    await this.post('reservas.php', {
+      txtkey: m[1], txtkey2: m[2], txtkey3: m[3], txtkey4: m[4], txtkey5: m[5],
+      txtCancha: 'Unica', txtaction: 'borrar',
+    });
+    const after = await this.getSheet(torneoId, matricula);
+    return !after.alreadyMine;
   }
 }
 
