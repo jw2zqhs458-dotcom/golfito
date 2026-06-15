@@ -152,7 +152,7 @@ export class NewmanClient {
     const html = await this.get(`reservas.php?TorneoID=${encodeURIComponent(torneoId)}&vuelta=index2.php`);
     return {
       slots: parseFreeSlots(html, matricula),
-      alreadyMine: hasMyReservation(html),
+      alreadyMine: hasMyReservation(html, matricula),
       raw: html,
     };
   }
@@ -309,17 +309,12 @@ export function parseFreeSlots(html: string, matricula: string): Slot[] {
   return Array.from(map.values()).sort((a, b) => a.minutes - b.minutes || a.hoyo - b.hoyo);
 }
 
-/** Detecta si el socio ya tiene una reserva en la planilla (por apellido). */
-export function hasMyReservation(html: string, surname?: string): boolean {
-  const s = (surname ?? process.env.NEWMAN_SURNAME ?? '').toUpperCase().trim();
-  if (!s) return false;
-  // Las reservas propias se pueden borrar -> aparece borrarReserva(...,'NOMBRE').
-  const re = /borrarReserva\([^)]*\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    if (stripAccents(m[0].toUpperCase()).includes(stripAccents(s))) return true;
-  }
-  return false;
+/** Detecta si el socio ya tiene una reserva en la planilla (por matrícula). */
+export function hasMyReservation(html: string, matricula?: string): boolean {
+  const mat = (matricula ?? process.env.NEWMAN_USER ?? '').trim();
+  if (!mat) return false;
+  // Las reservas se muestran como "Apellido Nombre [MATRICULA-HCP](juego)".
+  return new RegExp(`\\[\\s*${mat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[-\\]]`).test(html);
 }
 
 /** Elige el slot más cercano al horario objetivo (en minutos). */
