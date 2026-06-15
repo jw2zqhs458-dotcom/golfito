@@ -34,7 +34,7 @@ echo "→ Buscando línea libre cerca de las ${TARGET_H}:00 en torneo $TID..."
 SHEET="$(curl -s -m 30 -A "$UA" -b "$JAR" "$BASE/reservas.php?TorneoID=$TID&vuelta=index2.php")"
 read -r H M HOYO < <(printf '%s' "$SHEET" | python3 -c '
 import sys,re
-t=sys.stdin.read()
+t=sys.stdin.buffer.read().decode("latin-1")
 mat="'"$USER_MAT"'"; target=int("'"$TARGET_H"'")*60
 slots={}
 for m in re.finditer(r"altaReserva\(\s*"+re.escape(mat)+r"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\x27?\w+\x27?\s*,\s*(\d+)\s*\)", t):
@@ -68,7 +68,7 @@ VR="$(curl -s -m 30 -A "$UA" -b "$JAR" -c "$JAR" \
   "$BASE/reservasalta.php")"
 NAME="$(printf '%s' "$VR" | python3 -c '
 import sys,re
-t=sys.stdin.read()
+t=sys.stdin.buffer.read().decode("latin-1")
 m=re.search(r"name=\"txtName1\"\s+value=\"([^\"]*)\"", t)
 print((m.group(1).strip() if m else ""))
 ')"
@@ -86,7 +86,7 @@ curl -s -m 30 -A "$UA" -b "$JAR" -c "$JAR" \
 
 echo "→ Verificando si quedó en la planilla..."
 SHEET2="$(curl -s -m 30 -A "$UA" -b "$JAR" "$BASE/reservas.php?TorneoID=$TID&vuelta=index2.php&_=$RANDOM")"
-TOTAL="$(printf '%s' "$SHEET2" | python3 -c 'import sys,re; m=re.search(r"Total de Reservas:\s*(\d+)", sys.stdin.read()); print(m.group(1) if m else "?")')"
+TOTAL="$(printf '%s' "$SHEET2" | python3 -c 'import sys,re; m=re.search(r"Total de Reservas:\s*(\d+)", sys.stdin.buffer.read().decode("latin-1")); print(m.group(1) if m else "?")')"
 if printf '%s' "$SHEET2" | grep -q "\[$USER_MAT-"; then
   echo ""
   echo "✅✅ RESERVA CONFIRMADA desde tu IP (Total de Reservas: $TOTAL)."
