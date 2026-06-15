@@ -106,52 +106,45 @@ export class NewmanClient {
     return new TextDecoder('latin1').decode(buf);
   }
 
-  // Referer de la última URL visitada (como navega un browser). El sistema del
-  // club EXIGE headers de navegador real para aceptar el alta de reservas; con
-  // headers mínimos el "agregar" se descarta en silencio.
-  private lastUrl: string | undefined;
+  private static readonly UA =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
-  private browserHeaders(write = false): Record<string, string> {
-    const h: Record<string, string> = {
-      Cookie: write ? this.writeCookieHeader() : this.cookieHeader(),
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-      Accept:
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'Accept-Language': 'es-419,es;q=0.9',
-      Origin: 'https://www.clubnewmangolf.com',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'same-origin',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-    };
-    if (this.lastUrl) h.Referer = this.lastUrl;
-    return h;
-  }
-
+  // LECTURAS: headers mínimos + todas las cookies (así la sesión queda bien).
   private async get(path: string): Promise<string> {
-    const url = `${BASE}/${path}`;
-    const res = await fetch(url, {
+    const res = await fetch(`${BASE}/${path}`, {
       method: 'GET',
-      headers: this.browserHeaders(),
+      headers: { Cookie: this.cookieHeader(), 'User-Agent': NewmanClient.UA },
       redirect: 'manual',
     });
-    this.lastUrl = url;
     this.storeSetCookies(res);
     return this.readText(res);
   }
 
+  // ESCRITURAS (alta/baja de reserva): el servidor sólo las acepta con las 2
+  // cookies base + headers de navegador real (Origin/Referer/Sec-Fetch). Con
+  // headers mínimos o con las cookies de config de más, descarta el alta en
+  // silencio y devuelve el formulario.
   private async post(path: string, data: Record<string, string>): Promise<string> {
-    const url = `${BASE}/${path}`;
     const body = new URLSearchParams(data).toString();
-    const res = await fetch(url, {
+    const res = await fetch(`${BASE}/${path}`, {
       method: 'POST',
-      headers: { ...this.browserHeaders(true), 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        Cookie: this.writeCookieHeader(),
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': NewmanClient.UA,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'es-419,es;q=0.9',
+        Origin: 'https://www.clubnewmangolf.com',
+        Referer: `${BASE}/reservasalta.php`,
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+      },
       body,
       redirect: 'manual',
     });
-    this.lastUrl = url;
     this.storeSetCookies(res);
     return this.readText(res);
   }
