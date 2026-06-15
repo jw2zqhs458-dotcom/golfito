@@ -16,8 +16,11 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@sparticuz/chromium": "^149.0.0",
     "@types/node": "20.14.10",
     "@types/react": "18.3.3",
+    "playwright": "^1.60.0",
+    "playwright-core": "^1.60.0",
     "tsx": "4.16.2",
     "typescript": "5.5.3"
   }

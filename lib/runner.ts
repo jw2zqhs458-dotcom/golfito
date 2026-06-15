@@ -5,6 +5,7 @@ import { getConfig, minutesToHHMM, type Weekday } from './config';
 import { NewmanClient, pickBestSlot, type Slot, type Tournament } from './newman';
 import { sendWhatsApp } from './twilio';
 import { apodoFor } from './roster';
+import { bookWithBrowser } from './booker';
 
 export interface DayReport {
   day: Weekday;
@@ -78,18 +79,25 @@ export async function run(opts: { dryRun?: boolean } = {}): Promise<RunResult> {
       continue;
     }
 
-    // Hay lugar. Reservar o sólo avisar.
+    // Hay lugar. Reservar (con navegador real) o sólo avisar.
     if (cfg.autoBook && !opts.dryRun) {
-      const res = await client.book(t.torneoId, best, cfg.user, partners);
-      if (res.ok) {
-        reports.push({ day, tournament: tslim, status: 'reservado', bestSlot: best });
+      const res = await bookWithBrowser({
+        user: cfg.user,
+        pass: cfg.pass,
+        torneoId: t.torneoId,
+        matricula: cfg.user,
+        partners,
+        targetMinutes: cfg.targetMinutes,
+      });
+      if (res.ok && res.alreadyBooked) {
+        reports.push({ day, tournament: tslim, status: 'ya_reservado' });
+      } else if (res.ok) {
+        const slot = res.slot ?? best;
+        reports.push({ day, tournament: tslim, status: 'reservado', bestSlot: slot });
         bookedMessages.push(
-          `✅ ${capitalize(day)} ${t.date} — reservado ${best.label} (hoyo ${best.hoyo}).\n` +
+          `✅ ${capitalize(day)} ${t.date} — reservado ${slot.label} (hoyo ${slot.hoyo}).\n` +
             `${t.name}\nJugadores: ${lineupLabel}`
         );
-      } else if (res.quotaExceeded) {
-        // El club todavía no habilita el cupo: reintentamos callados (sin avisar).
-        reports.push({ day, tournament: tslim, status: 'no_habilitado', bestSlot: best, detail: res.message });
       } else {
         reports.push({ day, tournament: tslim, status: 'error_reserva', bestSlot: best, detail: res.message });
         availableMessages.push(

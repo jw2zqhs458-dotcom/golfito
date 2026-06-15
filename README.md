@@ -29,12 +29,24 @@ estado de sesión por cookie. El flujo replicado en [`lib/newman.ts`](lib/newman
 | Validar | `POST reservasalta.php` (`txtaction=verificar`) | Valida cada matrícula y trae el nombre |
 | Confirmar | `POST reservasalta.php` (`txtaction=agregar`) | Confirma la reserva con todos los jugadores |
 
-> ⚠️ Entre *iniciar* y *confirmar* hay una ventana de tiempo corta: si se
-> demora, el sistema responde *"EL TIEMPO DISPONIBLE … HA FINALIZADO"*. El
-> código hace los tres pasos seguidos en la misma sesión.
+Idempotencia: antes de reservar se revisa la planilla buscando tu matrícula
+(`[NNNNNN-…]`); si ya tenés lugar, no duplica.
 
-Idempotencia: antes de reservar se revisa la planilla buscando tu apellido
-(`NEWMAN_SURNAME`); si ya tenés lugar, no duplica.
+### ⚠️ La reserva necesita un navegador real (Cloudflare)
+
+El sitio está detrás de **Cloudflare**, que **bloquea la confirmación del alta**
+(el POST `agregar`) si la conexión no tiene "fingerprint" de navegador real
+(TLS/HTTP2). Un cliente HTTP normal (curl/fetch) **lee** todo bien, pero al
+**confirmar** la reserva Cloudflare la descarta en silencio — sin importar IP,
+headers ni cookies.
+
+Por eso la arquitectura es híbrida:
+
+- **Lecturas / monitoreo** (`lib/newman.ts`): HTTP normal. Rápido y liviano.
+- **Reserva** (`lib/booker.ts`): **Chromium headless** vía Playwright
+  (`@sparticuz/chromium` en Vercel). Hace login, abre la planilla, clickea el
+  casillero, carga las matrículas y confirma — como una persona. Las matrículas
+  ya están validadas, así que se **saltea "Verificar"** y se confirma directo.
 
 ### Plantel por defecto
 
@@ -67,11 +79,15 @@ app/
   api/check/route.ts    Igual que cron pero en modo dryRun (sólo consulta)
   api/whatsapp/route.ts Webhook de Twilio para comandos por chat
 lib/
-  newman.ts             Cliente + parsers del sistema del club
+  newman.ts             Cliente HTTP + parsers (lecturas)
+  booker.ts             Reserva con navegador real (Playwright/Chromium)
+  browser.ts            Lanzador de Chromium (serverless en Vercel, local en dev)
   runner.ts             Orquestación (login → buscar → reservar → avisar)
   twilio.ts             Envío de WhatsApp por API REST
   config.ts             Lectura de variables de entorno
+  roster.ts             Plantel por defecto (apodos → matrícula)
 scripts/check.ts        Prueba local en modo dryRun
+scripts/test-ip.sh      Test del flujo de reserva por HTTP (diagnóstico)
 ```
 
 ---
@@ -105,6 +121,21 @@ Copiá [`.env.example`](.env.example) y completá. En Vercel se cargan en
 3. Cargá las variables de entorno de la tabla.
 4. Deploy. El cron de [`vercel.json`](vercel.json) corre cada 15 min y llama a
    `/api/cron`.
+
+### Requisitos del runtime (Chromium)
+- La reserva lanza **Chromium headless** (`@sparticuz/chromium`). En Vercel
+  corre en el runtime **Node.js** (no Edge) — las API routes ya usan Node.
+- Subí la **memoria** de la función a **1024 MB** o más (Chromium lo necesita):
+  Project → Settings → Functions → Memory.
+- **Duración**: en **Hobby** el límite es 60 s (puede ser justo con el arranque
+  en frío de Chromium). En **Pro** subí `maxDuration` a 300 s para margen.
+- `next.config.js` ya marca `@sparticuz/chromium`/`playwright-core` como
+  paquetes externos para que el binario no se rompa al empaquetar.
+
+> ⚠️ **Validación**: el booking con navegador no se puede probar en entornos que
+> interceptan TLS (proxies MITM); ahí Cloudflare ve una firma que no es de
+> navegador y rechaza igual. La prueba real es en el deploy de Vercel (salida a
+> internet directa) o corriéndolo en una máquina con Chrome y red directa.
 
 ### Frecuencia del cron
 - En el plan **Hobby** los cron jobs de Vercel se ejecutan con baja frecuencia
